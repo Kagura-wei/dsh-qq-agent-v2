@@ -1,0 +1,13 @@
+# 仓库里一律用 LF，checkout 时也不转换（Windows 上 git 默认 CRLF，会在 NAS/Linux 上跑出
+# 满屏 ^M）。二进制文件标记出来，避免被当文本做换行转换而损坏。
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.zst binary
+*.gz binary
+*.woff2 binary

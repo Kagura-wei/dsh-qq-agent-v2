@@ -1,0 +1,11 @@
+# 在任意安装本包的 DSH profile 中挂载 QQ agent（推倒重来版）。
+#
+# 架构：本插件是反向 WebSocket 服务器，NapCat 主动连过来。
+# NapCat 跑在 docker bridge 里，经 172.17.0.1 访问宿主机，
+# 因此插件必须监听 0.0.0.0（默认配置已是），否则容器连不进来。
+#
+# 端口默认 6701。旧 dsh-qq-onebot-bridge(6700) 已按决策删除，
+# 同一条 NapCat 反向 WS 只能接一个消费方。
+- insert:
+    - id: dsh-qq-chat-agent
+      name: dsh-qq-agent-v2

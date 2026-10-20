@@ -1,0 +1,55 @@
+{
+  "name": "dsh-qq-agent-v2",
+  "version": "0.1.0",
+  "description": "QQ 群聊/私聊 agent（DSH 插件，推倒重来版）：反向 WebSocket 接 NapCat(OneBot v11)，事件驱动 + 白名单门控 + 响应档位，行为层参考 K0nd1us/QQ-agent",
+  "license": "MIT",
+  "author": "Kagura",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kagura-wei/dsh-qq-agent-v2.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Kagura-wei/dsh-qq-agent-v2/issues"
+  },
+  "homepage": "https://github.com/Kagura-wei/dsh-qq-agent-v2#readme",
+  "type": "module",
+  "main": "lib/index.js",
+  "scripts": {
+    "test": "node test/selftest.mjs && node test/ws-smoke.mjs && node test/persona-test.mjs && node test/content-test.mjs && node test/context-test.mjs && node test/image-desc-test.mjs && node test/image-slice-test.mjs && node test/judge-test.mjs && node test/meme-test.mjs && node test/mention-test.mjs && node test/runner-test.mjs && node test/reminder-test.mjs && node test/client-test.mjs"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "qq",
+    "onebot",
+    "napcat",
+    "agent"
+  ],
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "peerDependencies": {
+    "schemastery": "*"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  }
+}

@@ -1,0 +1,29 @@
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# 本地运行产物。插件默认 cwd = process.cwd()，所以这些目录可能就落在仓库根目录里：
+#   qq-archive/       每个群/每个人的完整聊天存档（含 QQ 号、消息原文、图片）
+#   qq-reminders.json 提醒落盘（含 QQ 号与提醒原文）
+#   qq-memes/         表情包库（含自动生成的 .web-token）
+qq-archive/
+qq-agent-data/
+qq-memes/
+qq-reminders.json
+.web-token
+*.log
+
+# 会话 / 压缩数据
+*.zst
+*.jsonl
+
+# 环境变量与本地配置
+.env
+.env.*
+.tmp-*
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
