@@ -1,6 +1,6 @@
 {
   "name": "dsh-qq-agent-v2",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "QQ 群聊/私聊 agent（DSH 插件，推倒重来版）：反向 WebSocket 接 NapCat(OneBot v11)，事件驱动 + 白名单门控 + 响应档位，行为层参考 K0nd1us/QQ-agent",
   "license": "MIT",
   "author": "Kagura",
@@ -15,7 +15,7 @@
   "type": "module",
   "main": "lib/index.js",
   "scripts": {
-    "test": "node test/selftest.mjs && node test/ws-smoke.mjs && node test/persona-test.mjs && node test/content-test.mjs && node test/context-test.mjs && node test/image-desc-test.mjs && node test/image-slice-test.mjs && node test/judge-test.mjs && node test/meme-test.mjs && node test/mention-test.mjs && node test/runner-test.mjs && node test/reminder-test.mjs && node test/client-test.mjs"
+    "test": "node test/selftest.mjs && node test/ws-smoke.mjs && node test/persona-test.mjs && node test/content-test.mjs && node test/context-test.mjs && node test/image-desc-test.mjs && node test/image-slice-test.mjs && node test/reply-test.mjs && node test/forward-test.mjs && node test/video-test.mjs && node test/judge-test.mjs && node test/meme-test.mjs && node test/mention-test.mjs && node test/runner-test.mjs && node test/reminder-test.mjs && node test/safety-test.mjs && node test/client-test.mjs"
   },
   "exports": {
     ".": "./lib/index.js",

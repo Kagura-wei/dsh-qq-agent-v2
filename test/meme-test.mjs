@@ -125,6 +125,43 @@ check('纯标记回复 → 正文为空', () => {
   assert.deepEqual(r.picks, ['happy'])
 })
 
+// 2026-10-21：换 provider 后模型稳定只写前半截（`\n\n&&sad`，收尾的 && 没了）。
+// 旧正则只认成对标记，于是每轮尾巴都漏到群里 —— 这里锁死半截写法也要剥。
+check('半截标记（整行只有 &&sad）→ 剥离、按命中发图、不留空行', () => {
+  const r = stripMemeTags('账户余额一直是零\n\n&&sad', ['happy', 'sad'])
+  assert.equal(r.text, '账户余额一直是零')
+  assert.deepEqual(r.picks, ['sad'])
+})
+
+check('半截标记：行尾挂着（正文 &&sigh）→ 摘掉尾巴', () => {
+  const r = stripMemeTags('这本又断更了 &&sigh', ['sigh'])
+  assert.equal(r.text, '这本又断更了')
+  assert.deepEqual(r.picks, ['sigh'])
+})
+
+check('半截标记：黏在正文尾部（正文&&happy）命中分类才剥', () => {
+  assert.equal(stripMemeTags('好耶&&happy', ['happy']).text, '好耶')
+  // 不认识的键、又没有空白分隔 → 分不清是标记还是正文，原样保留
+  assert.equal(stripMemeTags('用 a&&b 表示与', ['happy']).text, '用 a&&b 表示与')
+})
+
+check('半截标记：不认识的键也剥离（只记 invalid，不发图）', () => {
+  const r = stripMemeTags('语气词 &&f', ['sad'])
+  assert.equal(r.text, '语气词')
+  assert.deepEqual(r.picks, [])
+  assert.deepEqual(r.invalid, ['f'])
+})
+
+check('单独的 && 也得清掉（协议不外泄）', () => {
+  const r = stripMemeTags('算了 &&', ['sad'])
+  assert.equal(r.text, '算了')
+})
+
+check('普通文本里的 && 不被误伤（行内、带空格）', () => {
+  const body = '条件写 A && B 就行'
+  assert.equal(stripMemeTags(body, ['b']).text, body)
+})
+
 check('无标记时正文原样（含空行）', () => {
   const body = '第一段\n\n第二段'
   assert.equal(stripMemeTags(body, ['happy']).text, body)

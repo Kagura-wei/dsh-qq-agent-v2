@@ -270,7 +270,11 @@ check('reply 段的消息号被拎出来', () => {
     ],
   })
   assert.equal(msg.replyTo, 12345)
-  assert.equal(msg.text, '这句你怎么看', '引用内容不该混进正文')
+  // 消息号本身绝不能进正文 —— 那等于把一串数字当人话说给模型听。
+  // 段本身留一个 `[引用]` 占位是刻意的：真正的内容展开发生在 handle() 里
+  // （reply.js 会把它换成「[引用 某人: 原话]」），归一化阶段不做网络请求。
+  assert.ok(!msg.text.includes('12345'), '消息号不该混进正文')
+  assert.match(msg.text, /这句你怎么看/, '自己说的话必须在')
 })
 check('没有 reply 段时 replyTo 为 0', () => {
   const msg = normalizeEvent({

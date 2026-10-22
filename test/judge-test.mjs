@@ -9,7 +9,7 @@
  * 运行：node test/judge-test.mjs
  */
 import assert from 'node:assert/strict'
-import { Judge, parseVerdict } from '../lib/judge.js'
+import { Judge, parseVerdict, parseVerdict3 } from '../lib/judge.js'
 
 const logger = { info() {}, warn() {}, error() {} }
 
@@ -657,6 +657,110 @@ await checkAsync('跟进期模式判定不可用仍按 failOpen 放行（旧行�
   const r = await judge.evaluate({ key: 'group:1', scene: 'group', recent })
   assert.equal(r.reply, true)
   assert.equal(r.failOpen, true)
+})
+
+console.log('\n【三项判断：相关 / 同题 / 需要】')
+
+check('三个字母：YYY 才接，任一 N 都不接', () => {
+  assert.equal(parseVerdict3('YYY').reply, true)
+  assert.equal(parseVerdict3('YYN').reply, false, '不需要我参与就不接')
+  assert.equal(parseVerdict3('NYY').reply, false, '与我无关就不接')
+  assert.equal(parseVerdict3('YNY').reply, false, '换了话题就不接')
+})
+
+check('能逐项看出是哪一关卡住的（排障与调参靠它）', () => {
+  const r = parseVerdict3('YYN')
+  assert.equal(r.related, true)
+  assert.equal(r.same, true)
+  assert.equal(r.need, false)
+})
+
+check('带标签的写法也能逐项取到，并带上模型自报的理由', () => {
+  const r = parseVerdict3('相关=Y 同题=Y 需要=N\n理由：换话题了')
+  assert.equal(r.reply, false)
+  assert.equal(r.same, true)
+  assert.equal(r.need, false)
+  assert.equal(r.detail, '换话题了')
+})
+
+check('编号写法、空格写法都认（模型不总听话）', () => {
+  assert.equal(parseVerdict3('1=Y 2=Y 3=Y').reply, true)
+  assert.equal(parseVerdict3('Y Y N').reply, false)
+  assert.equal(parseVerdict3('YYN 换了话题').reply, false)
+})
+
+check('只有单字母时退化成老行为（三项跟随同一个答案）', () => {
+  assert.equal(parseVerdict3('Y').reply, true)
+  assert.equal(parseVerdict3('Y').same, true)
+  assert.equal(parseVerdict3('N').reply, false)
+  assert.equal(parseVerdict3('N').related, false)
+})
+
+check('认不出一律不接（解析失败绝不能放行）', () => {
+  assert.equal(parseVerdict3('这个不好说').reply, false)
+  assert.equal(parseVerdict3('这个不好说').verdict, 'unrecognized')
+  assert.equal(parseVerdict3('').verdict, 'empty')
+  assert.equal(parseVerdict3(null).reply, false)
+})
+
+console.log('\n【话题锚点：第 2 项判断的参照物】')
+
+await checkAsync('跟进期提示词里带上「叫醒我的那句话」', async () => {
+  const ctx = makeCtx({ reply: 'YYN' })
+  const judge = makeJudge(ctx)
+  judge.recordWake({ key: 'group:1', text: '6701 端口被占了怎么办', senderName: '甲', reason: 'at' })
+  judge.recordReply({ key: 'group:1', text: '换 6702' })
+  await judge.evaluate({ key: 'group:1', scene: 'group', recent })
+  const text = ctx.requests[0].messages[0].content[0].text
+  assert.ok(text.includes('【叫醒我的那句话】'), '要单独标出锚点')
+  assert.ok(text.includes('6701 端口被占了怎么办'), '要把原话带上')
+})
+
+await checkAsync('常开模式没有"叫醒我的话"，不塞锚点', async () => {
+  const ctx = makeCtx({ reply: 'YYN' })
+  const judge = makeJudge(ctx)
+  judge.recordWake({ key: 'group:1', text: '6701 端口被占了怎么办', senderName: '甲' })
+  await judge.evaluate({ key: 'group:1', scene: 'group', recent, mode: 'ambient' })
+  const text = ctx.requests[0].messages[0].content[0].text
+  assert.equal(text.includes('【叫醒我的那句话】'), false, '常开模式没有被叫醒这回事')
+})
+
+await checkAsync('锚点只留最新一条（接话后换成那条新消息）', async () => {
+  const judge = makeJudge(makeCtx({ reply: 'N' }))
+  judge.recordWake({ key: 'group:1', text: '第一句', senderName: '甲' })
+  judge.recordWake({ key: 'group:1', text: '第二句', senderName: '乙' })
+  assert.equal(judge.wakeAnchor('group:1').text, '第二句')
+  assert.equal(judge.wakeAnchor('group:2'), undefined)
+})
+
+await checkAsync('锚点是话题判断的依据：三项判断写进提示词，且要求逐项作答', async () => {
+  const ctx = makeCtx({ reply: 'YYN' })
+  const judge = makeJudge(ctx)
+  judge.recordWake({ key: 'group:1', text: '这报错咋整', senderName: '甲' })
+  judge.recordReply({ key: 'group:1', text: '看下端口' })
+  await judge.evaluate({ key: 'group:1', scene: 'group', recent })
+  const text = ctx.requests[0].messages[0].content[0].text
+  assert.match(text, /1 相关/)
+  assert.match(text, /2 同题/)
+  assert.match(text, /3 需要/)
+  assert.match(text, /第一行只写三个字母/)
+})
+
+await checkAsync('输出预算给足三项判断（默认 320，太小会被思考吃光）', async () => {
+  const ctx = makeCtx({ reply: 'YYN' })
+  const judge = makeJudge(ctx)
+  await judge.evaluate({ key: 'group:1', scene: 'group', recent })
+  assert.ok(ctx.requests[0].maxTokens >= 256, `实际 ${ctx.requests[0].maxTokens}`)
+})
+
+await checkAsync('三项分别计数（看是哪一关最常拦住）', async () => {
+  const ctx = makeCtx({ reply: 'YYN' })
+  const judge = makeJudge(ctx)
+  await judge.evaluate({ key: 'group:1', scene: 'group', recent })
+  assert.equal(judge.stats.relatedYes, 1)
+  assert.equal(judge.stats.sameYes, 1)
+  assert.equal(judge.stats.needYes, 0)
+  assert.equal(judge.stats.no, 1)
 })
 
 console.log(`\n通过 ${passed} 项，失败 ${failed} 项`)

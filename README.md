@@ -19,11 +19,14 @@
 | **上下文记忆** | 每群一份会话，按"轮"（默认 5 分钟间隔）注入最近记录；超出预算时用便宜小模型把更早的轮压成摘要 |
 | **图片理解** | 入站图片交给视觉模型识别；长截图沿长边切段，避免被宿主整张拒收（单边 8192 上限） |
 | **历史图片描述** | 注入通道只能传字符串，历史图会退化成 `[图片]` —— 这里用视觉模型补一句描述并缓存 |
-| **相关性判定** | 跟进期 / 常开接话两种模式，用轻量通道（约 250 token）判"这话是不是在跟我说"，避免每条群聊都烧主会话 |
+| **引用消息展开** | 「引用某条消息再问」不再只剩一个消息号：先把被引用的原话捞回来（优先查自己的存档，查不到再问 NapCat），再连同引用里的图片/视频一起交给模型 |
+| **合并转发展开** | 「群聊的聊天记录」不再是一句 `[聊天记录]` 占位：逐层摊平成「谁说的 + 说了什么」，多层嵌套里的文字、图片、视频全都照常进模型 |
+| **视频抽帧** | 模型没有视频通道，所以收到视频就下载 + ffmpeg 抽 2 帧当图片送进去；抽不出来才退回 `[视频]` 占位 |
+| **相关性判定** | 跟进期 / 常开接话两种模式，用轻量通道（约 600 token）做三项判断：**是否与我相关 / 是否同一话题 / 是否需要我参与**，三项全过才接话，避免每条群聊都烧主会话 |
 | **分层工具面** | 管理员（`agentUsers`）拿宿主全量工具，其他人只拿 `chatTools` 白名单 —— 实测 170 个工具 ≈ 3.8 万 token/轮 |
 | **提醒** | "提醒我 10 分钟后..." 由模型判定意图后落盘，到点直接发，不经模型；支持查看/取消 |
 | **表情包** | 模型在回复里写 `&&分类&&` 就会附一张该分类的表情；自带独立管理页（浏览/上传/装社区包） |
-| **出站保护** | 系统提示泄漏指纹内置生效；限频、长度切分、多段转合并转发卡片 |
+| **出站保护** | 提示词泄漏 + 推理泄漏双重指纹内置生效（后者拦住「模型把内心盘算当正文吐出来」）；限频、长度切分、多段转合并转发卡片 |
 
 ---
 
@@ -127,6 +130,9 @@ dsh --dump-config --profile web | grep -A20 dsh-qq-chat-agent
 | `contextMessages` / `contextMaxChars` / `contextRoundGapMin` | 上下文条数 / 字符预算 / 第几轮划分 |
 | `contextSummary*` | 超预算时用哪个小模型摘要、摘要多长、超时多少 |
 | `imageEnabled` / `longImageMaxParts` | 看图总开关 / 长图最多切几段（`0` 关闭、`1` 只缩放） |
+| `replyExpandEnabled` / `replyMaxChars` / `replyMaxImages` | 是否展开引用 / 引用内容最多多少字 / 最多带几张图（引用是背景信息，不该吃光本轮图片配额） |
+| `forwardExpandEnabled` / `forwardMaxDepth` / `forwardMaxNodes` / `forwardMaxChars` | 是否展开合并转发 / 嵌套几层 / 几条 / 多少字（超了截断并注明还剩多少） |
+| `videoEnabled` / `videoFrameCount` / `videoMaxBytes` | 视频抽帧总开关 / 每段抽几帧 / 超过多少 MB 不抽（宿主需装 ffmpeg） |
 | `judgeEnabled` / `judgeAlwaysOn` / `judgeProactivePerHour` | 跟进期接话 / 常开接话 / 每群每小时上限 |
 | `judgeFailOpen` | 判定挂了要不要照旧回复（默认开：判定只当刹车） |
 | `toolPolicyEnabled` / `agentUsers` / `chatTools` | 工具面分层开关 / 谁能派活 / 群友能用的工具白名单 |
@@ -134,6 +140,7 @@ dsh --dump-config --profile web | grep -A20 dsh-qq-chat-agent
 | `memeEnabled` / `memeWebEnabled` / `memeWebPort` | 表情包 / 管理页 / 管理页端口（默认 3098） |
 | `forwardEnabled` / `forwardMinChunks` | 多段回复转合并转发卡片 / 几段起转 |
 | `outboundGuardEnabled` / `outboundBlockWords` | 出站屏蔽词（默认空表，不预设词汇） |
+| `outboundReasoningGuard` / `leakRetryDelayMs` | 是否拦「推理泄漏」/ 拦下后隔多久重生成一次（默认 2.5s） |
 | `healthLogEveryRuns` | 每 N 轮打一行累计统计，用来发现"机器人悄悄变哑" |
 
 完整字段列表见 `lib/index.js` 里的 `Config`，每项都带说明（设置页也是从这个 schema 渲染出来的）。
@@ -187,7 +194,8 @@ E2E_SELF=<机器人QQ> E2E_GROUP=<群号> E2E_SENDERS='名字:QQ||名字2:QQ2' n
 
 - 只实现 OneBot v11 的反向 WS，不支持 HTTP 上报 / 正向 WS
 - 会话历史里**图片本身不进上下文**，只留一句描述（注入通道只能传字符串）
-- 上传的视频段不会被处理（要视频理解得另装插件）
+- 视频只能抽静态帧（默认 2 帧），没有声音、没有动作连续性 —— 「视频里谁说了什么」这类问题答不了
+- 抽帧依赖宿主机的 `ffmpeg`（找不到时静默退回 `[视频]` 占位）；视频只认 http(s) 地址，纯本地路径拿不到
 - 工具白名单只管"继承自宿主的工具"，挡不掉 preset 自己注册的工具
 - 用户在会话运行中切换身份（管理员↔群友），工具面要等这一轮结束才变
 

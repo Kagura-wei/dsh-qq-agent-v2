@@ -28,6 +28,10 @@ const logger = { info() {}, warn() {}, error() {} }
  *   collision    —— 第一轮报「持久化日志 id 冲突」，第二轮正常（考察重建重试）
  */
 function makeCtx(replyText = '模拟回复', mode = 'normal', options = {}) {
+  // replyText 可以是一串回复：按回合依次取（第 N 轮取第 N 项，用完后一直取最后一项）。
+  // 推理泄漏重试的用例靠它模拟"第一次吐乱码、重生成恢复正常"。
+  const textFor = (turn) =>
+    Array.isArray(replyText) ? (replyText[turn - 1] ?? replyText[replyText.length - 1] ?? '') : replyText
   // 模拟"该 sessionId 在持久化存储里已存在"（插件重启后的真实情况）
   const existingIds = options.existingIds ?? new Set()
   const resumeFails = options.resumeFails ?? false
@@ -101,7 +105,7 @@ function makeCtx(replyText = '模拟回复', mode = 'normal', options = {}) {
           fire('assistant/message', {
             turn,
             step: 0,
-            message: { content: [{ type: 'text', text: replyText }] },
+            message: { content: [{ type: 'text', text: textFor(turn) }] },
           })
           if (mode === 'foreign-turn' || mode === 'no-turn-end') {
             if (mode === 'foreign-turn') fire('turn/end', { turn, reason: 'completed' })
@@ -938,6 +942,74 @@ console.log('\n[出站] 内容安全拦截')
   check('终态记为 blocked', () => assert.equal(runner.lastOutcome.get(key)?.state, 'blocked'))
   const left = await archive.getUnread(key, 10)
   check('被拦下的消息按已处理收尾（不无限重试）', () => assert.equal(left.length, 0))
+  await runner.stop()
+}
+
+console.log('\n[出站] 推理泄漏 -> 重生成一次')
+{
+  // 真机事故（2026-10-22 群 100000001）：模型的内心盘算被当成正文吐了出来，
+  // 原样发到了群里。这类文本不包含任何系统提示原文，旧指纹一个都命中不了。
+  const LEAK = `乙 says honestly they'd get excited seeing any 国乒 player. Casual, not addressed to me — participation medium. A light short comment could fit: 见到谁都激动，这才是真球迷。
+
+Keep it very short.这心态挺好，见谁都激动说明是真爱，不是挑着看`
+  const GOOD = '这心态挺好，见谁都激动说明是真爱'
+
+  const cfg = baseConfig({ leakRetryDelayMs: 800, runRetryDelayMs: 60000 })
+  const server = makeServer()
+  const { ctx } = makeCtx([LEAK, GOOD])
+  const runner = new Runner({
+    ctx,
+    getConfig: () => cfg,
+    archive,
+    sender: new Sender({ server, getConfig: () => cfg, logger }),
+    logger,
+  })
+  const key = 'group:1204'
+  await archive.append(key, { time: 1, senderId: 1, senderName: 'u', text: '在吗' })
+  runner.schedule(key, { scene: 'group', peerId: 1204 })
+
+  const delivered = await waitFor(() => server.sent.length === 1, 4000)
+  check('重生成后发出了正常那条', () => assert.equal(delivered, true))
+  check('发出去的是重生成的结果，不是那段盘算', () =>
+    assert.equal(server.sent[0]?.text, GOOD)
+  )
+  check('终态回到 ok', () => assert.equal(runner.lastOutcome.get(key)?.state, 'ok'))
+  await runner.stop()
+}
+
+console.log('\n[出站] 推理泄漏 -> 重试仍泄漏则放弃')
+{
+  const LEAK = `乙 says honestly they'd get excited seeing any 国乒 player. Casual, not addressed to me — participation medium.
+
+Keep it very short.这心态挺好`
+
+  const cfg = baseConfig({ leakRetryDelayMs: 800, runRetryDelayMs: 60000 })
+  const server = makeServer()
+  // 两轮都吐同样的盘算
+  const { ctx } = makeCtx(LEAK)
+  const runner = new Runner({
+    ctx,
+    getConfig: () => cfg,
+    archive,
+    sender: new Sender({ server, getConfig: () => cfg, logger }),
+    logger,
+  })
+  const key = 'group:1205'
+  await archive.append(key, { time: 1, senderId: 1, senderName: 'u', text: '在吗' })
+  runner.schedule(key, { scene: 'group', peerId: 1205 })
+
+  const gaveUp = await waitFor(() => runner.lastOutcome.get(key)?.state === 'leaked', 5000)
+  check('两轮都泄漏后终态记为 leaked', () => assert.equal(gaveUp, true))
+  check('没有把盘算发出去', () => assert.equal(server.sent.length, 0))
+  // lastOutcome 在第一轮结束时就已经是 leaked —— 那是"保留未读、准备重试"的
+  // 中间态。放弃是把未读标成已读，所以这里要等这个动作落下去，不能只看终态。
+  const deadline = Date.now() + 5000
+  let left = await archive.getUnread(key, 10)
+  while (left.length && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100))
+    left = await archive.getUnread(key, 10)
+  }
+  check('放弃后按已处理收尾（不无限重试）', () => assert.equal(left.length, 0))
   await runner.stop()
 }
 
